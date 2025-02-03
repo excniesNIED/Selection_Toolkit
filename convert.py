@@ -12,6 +12,19 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
+def extract_youtube_id(url):
+    """提取YouTube视频ID"""
+    patterns = [
+        r'/embed/([a-zA-Z0-9_-]+)',
+        r'v=([a-zA-Z0-9_-]+)',
+        r'youtu\.be/([a-zA-Z0-9_-]+)'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
 def sanitize_filename(title):
     return slugify(title, lowercase=True, max_length=80, word_boundary=True)
 
@@ -19,21 +32,16 @@ def process_figcaption(figcaption):
     if not figcaption:
         return ''
 
-    # 保留原始HTML结构但清理样式标签
     for tag in figcaption.find_all(['em', 'i', 'span']):
         tag.unwrap()
 
-    # 移除所有样式属性
     for tag in figcaption.find_all(True):
         if 'style' in tag.attrs:
             del tag.attrs['style']
 
-    # 获取处理后的HTML并清理换行
     description = str(figcaption.p).replace('\n', ' ') if figcaption.p else ''
-    description = re.sub(r'</?p[^>]*>', '', description)  # 移除残留的p标签
+    description = re.sub(r'</?p[^>]*>', '', description)
     description = re.sub(r'\s{2,}', ' ', description).strip()
-
-    # 处理单引号转义
     return description.replace("'", "\\'")
 
 def process_image(figure):
@@ -73,7 +81,7 @@ def process_callout(div):
 def process_article(article):
     h = html2text.HTML2Text()
     h.body_width = 0
-    h.ignore_links = True  # 禁用自动链接转换
+    h.ignore_links = True
     h.ignore_images = True
     h.ul_item_mark = '*'
     h.emphasis_mark = '_'
@@ -89,16 +97,32 @@ def process_article(article):
         element_str = str(element)
         soup = BeautifulSoup(element_str, 'html.parser')
 
-        # 处理图片（更新后的逻辑）
+        # 处理YouTube视频
+        for figure in soup.find_all('figure', class_='kg-embed-card'):
+            iframe = figure.find('iframe')
+            if iframe and 'youtube.com' in iframe.get('src', ''):
+                src = iframe['src']
+                video_id = extract_youtube_id(src)
+                if video_id:
+                    figure.replace_with(f'{{% video youtube:{video_id} %}}')
+
+        # 处理普通视频容器（规则15）新逻辑
+        for video_container in soup.find_all('div', class_='kg-video-container'):
+            video_tag = video_container.find('video')
+            if video_tag and video_tag.has_attr('src'):
+                src = video_tag['src']
+                # 替换整个视频容器
+                video_container.replace_with(f'{{% video {src} %}}')
+
+        # 处理图片
         for figure in soup.find_all('figure'):
             img_md = process_image(figure)
             figure.replace_with(img_md)
 
-        # 处理链接（新增逻辑）
+        # 处理链接
         for a_tag in soup.find_all('a'):
             href = a_tag.get('href', '')
             if href:
-                # 直接保留原始HTML链接
                 a_tag.replace_with(str(a_tag))
 
         # 处理代码块
@@ -118,11 +142,10 @@ def process_article(article):
 
         modified_html = str(soup)
         modified_html = re.sub(r'\?ref=(itsfoss\.com|news\.itsfoss\.com)', '', modified_html)
-        modified_html = modified_html.replace('href="/', 'href="https://itsfoss.com/')  # 修复相对链接
+        modified_html = modified_html.replace('href="/', 'href="https://itsfoss.com/')
 
-        # 转换时保留HTML链接
         md_content = h.handle(modified_html).strip()
-        md_content = re.sub(r'\\\[(.*?)\\\]\((.*?)\)', r'[\1](\2)', md_content)  # 修复被转义的链接
+        md_content = re.sub(r'\\\[(.*?)\\\]\((.*?)\)', r'[\1](\2)', md_content)
         if md_content:
             output.append(md_content)
 
