@@ -59,6 +59,17 @@ def process_article(article):
             first_a = False
             continue
 
+        html_content = str(element)
+        # 处理code标签转换为pre块
+        soup = BeautifulSoup(html_content, 'html.parser')
+        for code_tag in soup.find_all('code'):
+            code_content = code_tag.get_text()
+            pre_tag = soup.new_tag('pre')
+            pre_tag.string = f'```\n{code_content}\n```'
+            code_tag.replace_with(pre_tag)
+        modified_html = str(soup)
+        modified_html = re.sub(r'\?ref=(itsfoss\.com|news\.itsfoss\.com)', '', modified_html)
+
         if element.name == 'figure':
             output.append(process_image(element))
         elif element.name == 'div':
@@ -68,13 +79,9 @@ def process_article(article):
             elif 'kg-callout-card' in classes:
                 output.append(process_callout(element))
             else:
-                html = str(element)
-                html = re.sub(r'\?ref=(itsfoss\.com|news\.itsfoss\.com)', '', html)
-                output.append(h.handle(html).strip())
+                output.append(h.handle(modified_html).strip())
         else:
-            html = str(element)
-            html = re.sub(r'\?ref=(itsfoss\.com|news\.itsfoss\.com)', '', html)
-            output.append(h.handle(html).strip())
+            output.append(h.handle(modified_html).strip())
 
     return '\n\n'.join(filter(None, output))
 
@@ -95,7 +102,8 @@ def main():
             og_title = soup.find('meta', property='og:title')['content']
             publish_time = soup.find('meta', property='article:modified_time')['content']
             date_str = datetime.fromisoformat(publish_time[:-1]).strftime('%Y%m%d')
-            og_image = soup.find('meta', property='og:image')['content']
+            og_description = soup.find('meta', property='og:description')
+            summary = og_description['content'].strip() if og_description else ''
 
             # 生成文件名
             safe_title = slugify(og_title, lowercase=True, max_length=60)
@@ -109,10 +117,6 @@ def main():
             author_link_tag = author_tag.find('a') if author_tag else None
             author = author_link_tag.text.strip() if author_link_tag else "Unknown"
             author_link = author_link_tag['href'] if author_link_tag else "#"
-
-            # 作者简介
-            bio_tag = soup.find('p', class_='author-card__bio')
-            summary = bio_tag.get_text(strip=True) if bio_tag else ''
 
             # 分类判断
             domain = urlparse(url).netloc
