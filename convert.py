@@ -112,11 +112,23 @@ def main():
             # 提取内容
             title = soup.find('h1', class_='post-hero__title').get_text(strip=True)
 
-            # 作者信息
-            author_tag = soup.find('h3', class_='author-card__name')
-            author_link_tag = author_tag.find('a') if author_tag else None
-            author = author_link_tag.text.strip() if author_link_tag else "Unknown"
-            author_link = author_link_tag['href'] if author_link_tag else "#"
+            # 作者信息处理
+            author_span = soup.find('span', class_=lambda c: c and ('post-info__author' in c or 'post-info__authors' in c))
+            author_link_tag = author_span.find('a') if author_span else None
+            author = "Unknown"
+            author_link = "#"
+
+            if author_span and author_link_tag:
+                href = author_link_tag.get('href', '')
+                classes = author_span.get('class', [])
+                if 'post-info__author' in classes:
+                    base_url = 'https://itsfoss.com'
+                elif 'post-info__authors' in classes:
+                    base_url = 'https://news.itsfoss.com'
+                else:
+                    base_url = ''
+                author_link = f"{base_url}{href}"
+                author = author_link_tag.get_text(strip=True)
 
             # 分类判断
             domain = urlparse(url).netloc
