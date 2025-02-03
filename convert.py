@@ -84,19 +84,16 @@ def main():
     with open('urls.txt') as f:
         urls = [line.strip() for line in f if line.strip()]
 
-    session = requests.Session() # 使用 Session 对象
-    session.headers.update(headers)
-
     for url in urls:
         try:
             print(f"处理 {url}")
-            response = session.get(url) # 使用 session.get()
+            response = requests.get(url, headers=headers)
             response.encoding = 'utf-8'
             soup = BeautifulSoup(response.text, 'html.parser')
 
             # 提取元数据
             og_title = soup.find('meta', property='og:title')['content']
-            publish_time = soup.find('meta', property='article:published_time')['content']
+            publish_time = soup.find('meta', property='article:modified_time')['content']
             date_str = datetime.fromisoformat(publish_time[:-1]).strftime('%Y%m%d')
             og_image = soup.find('meta', property='og:image')['content']
 
@@ -129,32 +126,33 @@ def main():
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write('---\n')
                 f.write(f'title: {title}\n')
-                f.write(f'date: {publish_time[:-1].replace("T", " ")}\n')
+                f.write('date: {{release_date}}\n')
                 f.write(f'abbrlink: \n') # 占位符
                 f.write('author:\n')
                 f.write(f'  - fosscope-translation-team\n')
-                f.write(f'  - {github_id}\n')
-                f.write(f'  - {github_id}\n')
-                f.write(f'banner: {og_image}\n')
-                f.write(f'cover: {og_image}\n')
+                f.write('  - {{translator}}\n')
+                f.write('  - {{proofreader}}\n')
+                f.write('banner: {{cover_image}}\n')
+                f.write('cover: {{cover_image}}\n')
                 f.write('categories:\n')
                 f.write(f'  - 翻译\n')
                 f.write(f'  - {category}\n')
                 f.write(f'tags: \n') # 占位符
+                f.write('  - {{tags}}\n')
                 f.write('authorInfo: |\n')
                 f.write(f'  via: {url}\n\n')
                 f.write(f'  作者：[{author}]({author_link})\n')
                 f.write(f'  选题：[{github_id}](https://github.com/{github_id})\n')
-                f.write(f'  译者：[{github_id}](https://github.com/{github_id})\n')
-                f.write(f'  校对：[{github_id}](https://github.com/{github_id})\n\n')
-                f.write(f'  本文由 [FOSScope翻译组](https://github.com/FOSScope/TranslateProject) 原创编译，[开源观察](https://fosscope.com/) 荣誉推出\n')
+                f.write('  译者：[{{translator}}](https://github.com/{{translator}})\n')
+                f.write('  校对：[{{proofreader}}](https://github.com/{{proofreader}})\n\n')
+                f.write('  本文由 [FOSScope翻译组](https://github.com/FOSScope/TranslateProject) 原创编译，[开源观察](https://fosscope.com/) 荣誉推出\n')
                 f.write('applied: false # 是否已被申领翻译\n')
                 f.write('translated: false # 是否已翻译完成\n')
                 f.write('proofread: false # 是否已校对完成\n')
                 f.write('published: false # 是否已发布\n')
                 f.write('---\n\n')
                 f.write(f'{summary}\n\n')
-                f.write('\n\n')
+                f.write('<!-- more -->\n')
                 f.write(f'{content}\n')
 
             print(f"已生成文件：{filename}")
