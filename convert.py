@@ -13,8 +13,7 @@ headers = {
 }
 
 def sanitize_filename(title):
-    cleaned = re.sub(r'[^a-zA-Z0-9\- ]', '', title).lower()
-    return re.sub(r'[\-]+', '-', cleaned.replace(' ', '-'))
+    return slugify(title, lowercase=True, max_length=80, word_boundary=True)
 
 def process_image(figure):
     imgs = figure.find_all('img')
@@ -50,6 +49,8 @@ def process_article(article):
     h.body_width = 0
     h.ignore_links = False
     h.ignore_images = True
+    h.ul_item_mark = '*'
+    h.emphasis_mark = '_'
 
     output = []
     first_a = True
@@ -59,31 +60,38 @@ def process_article(article):
             first_a = False
             continue
 
-        html_content = str(element)
-        # 处理code标签转换为pre块
-        soup = BeautifulSoup(html_content, 'html.parser')
+        element_str = str(element)
+        soup = BeautifulSoup(element_str, 'html.parser')
+
+        # 处理代码块
         for code_tag in soup.find_all('code'):
-            code_content = code_tag.get_text()
-            pre_tag = soup.new_tag('pre')
-            pre_tag.string = f'```\n{code_content}\n```'
-            code_tag.replace_with(pre_tag)
+            code_content = code_tag.get_text(strip=False).strip()
+            code_tag.replace_with(f'```\n{code_content}\n```')
+
+        # 处理图片
+        for figure in soup.find_all('figure'):
+            img_md = process_image(figure)
+            figure.replace_with(img_md)
+
+        # 处理按钮
+        for div in soup.find_all('div', class_='kg-button-card'):
+            button_md = process_button(div)
+            div.replace_with(button_md)
+
+        # 处理备注块
+        for div in soup.find_all('div', class_='kg-callout-card'):
+            callout_md = process_callout(div)
+            div.replace_with(callout_md)
+
         modified_html = str(soup)
         modified_html = re.sub(r'\?ref=(itsfoss\.com|news\.itsfoss\.com)', '', modified_html)
 
-        if element.name == 'figure':
-            output.append(process_image(element))
-        elif element.name == 'div':
-            classes = element.get('class', [])
-            if 'kg-button-card' in classes:
-                output.append(process_button(element))
-            elif 'kg-callout-card' in classes:
-                output.append(process_callout(element))
-            else:
-                output.append(h.handle(modified_html).strip())
-        else:
-            output.append(h.handle(modified_html).strip())
+        # 处理剩余内容
+        md_content = h.handle(modified_html).strip()
+        if md_content:
+            output.append(md_content)
 
-    return '\n\n'.join(filter(None, output))
+    return '\n\n'.join(output)
 
 def main():
     github_id = input("请输入GitHub ID: ")
@@ -98,7 +106,7 @@ def main():
             response.encoding = 'utf-8'
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # 提取元数据
+            # 元数据提取
             og_title = soup.find('meta', property='og:title')['content']
             publish_time = soup.find('meta', property='article:modified_time')['content']
             date_str = datetime.fromisoformat(publish_time[:-1]).strftime('%Y%m%d')
@@ -106,27 +114,24 @@ def main():
             summary = og_description['content'].strip() if og_description else ''
 
             # 生成文件名
-            safe_title = slugify(og_title, lowercase=True, max_length=60)
+            safe_title = sanitize_filename(og_title)
             filename = f"{date_str}-{safe_title}.md"
 
-            # 提取内容
+            # 标题提取
             title = soup.find('h1', class_='post-hero__title').get_text(strip=True)
 
-            # 作者信息处理
-            author_span = soup.find('span', class_=lambda c: c and ('post-info__author' in c or 'post-info__authors' in c))
+            # 作者信息
+            author_span = soup.find('span', class_=lambda c: c and c.startswith('post-info__author'))
             author_link_tag = author_span.find('a') if author_span else None
             author = "Unknown"
             author_link = "#"
 
             if author_span and author_link_tag:
                 href = author_link_tag.get('href', '')
-                classes = author_span.get('class', [])
-                if 'post-info__author' in classes:
+                if 'post-info__author' in author_span['class']:
                     base_url = 'https://itsfoss.com'
-                elif 'post-info__authors' in classes:
-                    base_url = 'https://news.itsfoss.com'
                 else:
-                    base_url = ''
+                    base_url = 'https://news.itsfoss.com'
                 author_link = f"{base_url}{href}"
                 author = author_link_tag.get_text(strip=True)
 
@@ -143,17 +148,17 @@ def main():
                 f.write('---\n')
                 f.write(f'title: {title}\n')
                 f.write('date: {{release_date}}\n')
-                f.write(f'abbrlink: \n') # 占位符
+                f.write('abbrlink: \n')
                 f.write('author:\n')
-                f.write(f'  - fosscope-translation-team\n')
+                f.write('  - fosscope-translation-team\n')
                 f.write('  - {{translator}}\n')
                 f.write('  - {{proofreader}}\n')
                 f.write('banner: {{cover_image}}\n')
                 f.write('cover: {{cover_image}}\n')
                 f.write('categories:\n')
-                f.write(f'  - 翻译\n')
+                f.write('  - 翻译\n')
                 f.write(f'  - {category}\n')
-                f.write(f'tags: \n') # 占位符
+                f.write('tags: \n')
                 f.write('  - {{tags}}\n')
                 f.write('authorInfo: |\n')
                 f.write(f'  via: {url}\n\n')
@@ -168,7 +173,7 @@ def main():
                 f.write('published: false # 是否已发布\n')
                 f.write('---\n\n')
                 f.write(f'{summary}\n\n')
-                f.write('<!-- more -->\n')
+                f.write('<!-- more -->\n\n')
                 f.write(f'{content}\n')
 
             print(f"已生成文件：{filename}")
