@@ -15,13 +15,34 @@ headers = {
 def sanitize_filename(title):
     return slugify(title, lowercase=True, max_length=80, word_boundary=True)
 
+def process_figcaption(figcaption):
+    if not figcaption:
+        return ''
+
+    # 保留原始HTML结构但清理样式标签
+    for tag in figcaption.find_all(['em', 'i', 'span']):
+        tag.unwrap()
+
+    # 移除所有样式属性
+    for tag in figcaption.find_all(True):
+        if 'style' in tag.attrs:
+            del tag.attrs['style']
+
+    # 获取处理后的HTML并清理换行
+    description = str(figcaption.p).replace('\n', ' ') if figcaption.p else ''
+    description = re.sub(r'</?p[^>]*>', '', description)  # 移除残留的p标签
+    description = re.sub(r'\s{2,}', ' ', description).strip()
+
+    # 处理单引号转义
+    return description.replace("'", "\\'")
+
 def process_image(figure):
     imgs = figure.find_all('img')
     if not imgs:
         return ""
 
     figcaption = figure.find('figcaption')
-    description = figcaption.get_text(strip=True) if figcaption else ''
+    description = process_figcaption(figcaption)
 
     image_tags = []
     for idx, img in enumerate(imgs):
@@ -52,7 +73,7 @@ def process_callout(div):
 def process_article(article):
     h = html2text.HTML2Text()
     h.body_width = 0
-    h.ignore_links = False
+    h.ignore_links = True  # 禁用自动链接转换
     h.ignore_images = True
     h.ul_item_mark = '*'
     h.emphasis_mark = '_'
@@ -68,10 +89,17 @@ def process_article(article):
         element_str = str(element)
         soup = BeautifulSoup(element_str, 'html.parser')
 
-        # 处理图片
+        # 处理图片（更新后的逻辑）
         for figure in soup.find_all('figure'):
             img_md = process_image(figure)
             figure.replace_with(img_md)
+
+        # 处理链接（新增逻辑）
+        for a_tag in soup.find_all('a'):
+            href = a_tag.get('href', '')
+            if href:
+                # 直接保留原始HTML链接
+                a_tag.replace_with(str(a_tag))
 
         # 处理代码块
         for code_tag in soup.find_all('code'):
@@ -90,9 +118,11 @@ def process_article(article):
 
         modified_html = str(soup)
         modified_html = re.sub(r'\?ref=(itsfoss\.com|news\.itsfoss\.com)', '', modified_html)
+        modified_html = modified_html.replace('href="/', 'href="https://itsfoss.com/')  # 修复相对链接
 
-        # 处理剩余内容
+        # 转换时保留HTML链接
         md_content = h.handle(modified_html).strip()
+        md_content = re.sub(r'\\\[(.*?)\\\]\((.*?)\)', r'[\1](\2)', md_content)  # 修复被转义的链接
         if md_content:
             output.append(md_content)
 
