@@ -20,11 +20,16 @@ def process_image(figure):
     if not imgs:
         return ""
 
-    last_img = imgs[-1]
-    src = last_img.get('src', '')
     figcaption = figure.find('figcaption')
     description = figcaption.get_text(strip=True) if figcaption else ''
-    return f"{{% image {src} '{description}' %}}"
+
+    image_tags = []
+    for idx, img in enumerate(imgs):
+        src = img.get('src', '')
+        img_description = description if idx == len(imgs)-1 else ''
+        image_tags.append(f"{{% image {src} '{img_description}' %}}")
+
+    return '\n'.join(image_tags)
 
 def process_button(div):
     a_tag = div.find('a')
@@ -63,15 +68,15 @@ def process_article(article):
         element_str = str(element)
         soup = BeautifulSoup(element_str, 'html.parser')
 
-        # 处理代码块
-        for code_tag in soup.find_all('code'):
-            code_content = code_tag.get_text(strip=False).strip()
-            code_tag.replace_with(f'```\n{code_content}\n```')
-
         # 处理图片
         for figure in soup.find_all('figure'):
             img_md = process_image(figure)
             figure.replace_with(img_md)
+
+        # 处理代码块
+        for code_tag in soup.find_all('code'):
+            code_content = code_tag.get_text(strip=False).strip()
+            code_tag.replace_with(f'```\n{code_content}\n```')
 
         # 处理按钮
         for div in soup.find_all('div', class_='kg-button-card'):
