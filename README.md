@@ -27,9 +27,9 @@
    ```
 
 3. **运行脚本**：
-   运行 `convert1.7.py` 脚本，并输入你的 GitHub ID：
+   运行 `convert.py` 脚本，并输入你的 GitHub ID：
    ```bash
-   python convert1.7.py
+   python convert.py
    ```
 
 4. **生成 Markdown 文件**：
@@ -37,7 +37,7 @@
 
 ### 文件结构
 
-- `convert1.7.py`：主脚本文件，负责处理 URL 并生成 Markdown 文件。
+- `convert.py`：主脚本文件，负责处理 URL 并生成 Markdown 文件。
 - `urls.txt`：包含要处理的 ITS FOSS 文章 URL。
 - `template.md`：Markdown 文件的模板，包含动态替换的变量。
 - `README.md`：项目说明文件。
