@@ -1,250 +1,233 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
+import json
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, scrolledtext
 import requests
+import threading
+import logging
 from datetime import datetime
 
-class TranslateApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("FOSSCOPE 翻译工具")
-        self.geometry("1000x800")
-
-        # 初始化配置
-        self.settings = {
-            "api_key": "",
-            "model": "deepseek-reasoner",
-            "prompt": """你是一个中英文翻译专家，将用户输入的英文科技新闻资讯或者英文技术文章翻译成中文，保持专业术语准确，不要翻译文件中的标记元素，保留原始文章中的Markdown标记格式，但需要将文件元信息中的所有{{translator}}替换为excniesnied，并将元信息中的applied字段和translated字段都修改为true（如果有的话），除此之外不要翻译元信息。并确保符合中文语言习惯，你可以调整语气和风格，并考虑到某些词语的文化内涵和地区差异。同时作为翻译家，需将原文翻译成具有信达雅标准的译文。注意链接之间增加空格、中英文之间需要增加空格、中文与数字之间需要增加空格、数字与单位之间需要增加空格、全角标点与其他字符之间不加空格、，将中文引号“”转换为「」。
-            """
+class TranslationApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("FOSSCOPE 翻译工具")
+        self.setup_ui()
+        self.setup_logging()
+        self.config = {
+            'api_base': "https://api.deepseek.com/v1",
+            'api_key': "",
+            'model': "deepseek-reasoner",
+            'prompt': ""
         }
 
-        self.project_path = tk.StringVar()
-        self.selected_category = tk.StringVar()
+    def setup_logging(self):
+        self.logger = logging.getLogger('TranslationTool')
+        self.logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
-        self.create_widgets()
-        self.log("应用程序初始化完成")
+    def setup_ui(self):
+        # 路径设置
+        path_frame = ttk.Frame(self.root)
+        path_frame.pack(pady=5, fill=tk.X)
 
-    def create_widgets(self):
-        # 项目路径部分
-        path_frame = ttk.Frame(self)
-        path_frame.pack(pady=5, fill=tk.X, padx=10)
-
-        ttk.Label(path_frame, text="项目路径：").pack(side=tk.LEFT)
-        self.path_entry = ttk.Entry(path_frame, textvariable=self.project_path, width=60)
-        self.path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-
-        ttk.Button(path_frame, text="浏览", command=self.browse_project_path).pack(side=tk.LEFT, padx=5)
-        ttk.Button(path_frame, text="加载", command=self.verify_project_structure).pack(side=tk.LEFT)
+        ttk.Label(path_frame, text="项目路径:").pack(side=tk.LEFT)
+        self.path_entry = ttk.Entry(path_frame, width=40)
+        self.path_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(path_frame, text="浏览", command=self.browse_path).pack(side=tk.LEFT)
+        ttk.Button(path_frame, text="加载", command=self.load_project).pack(side=tk.LEFT, padx=5)
 
         # 分类选择
-        category_frame = ttk.Frame(self)
-        category_frame.pack(pady=5, fill=tk.X, padx=10)
-
-        ttk.Label(category_frame, text="分类：").pack(side=tk.LEFT)
-        self.category_combo = ttk.Combobox(category_frame, textvariable=self.selected_category,
-                                           values=['news', 'talk', 'tech'], state="readonly", width=15)
+        self.category_var = tk.StringVar()
+        category_frame = ttk.Frame(self.root)
+        category_frame.pack(pady=5, fill=tk.X)
+        ttk.Label(category_frame, text="分类:").pack(side=tk.LEFT)
+        self.category_combo = ttk.Combobox(category_frame, textvariable=self.category_var,
+                                           values=["news", "talk", "tech"], state="readonly")
         self.category_combo.pack(side=tk.LEFT, padx=5)
-        self.category_combo.bind("<<ComboboxSelected>>", self.load_file_list)
+        self.category_combo.bind("<<ComboboxSelected>>", self.load_files)
 
         # 文件列表
-        list_frame = ttk.Frame(self)
-        list_frame.pack(pady=10, fill=tk.BOTH, expand=True, padx=10)
-
-        self.file_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, height=15)
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.file_listbox.yview)
-        self.file_listbox.configure(yscrollcommand=scrollbar.set)
-        self.file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.file_listbox = tk.Listbox(self.root, selectmode=tk.MULTIPLE, width=60, height=15)
+        self.file_listbox.pack(pady=5, fill=tk.BOTH, expand=True)
 
         # 操作按钮
-        button_frame = ttk.Frame(self)
-        button_frame.pack(pady=5, fill=tk.X, padx=10)
+        button_frame = ttk.Frame(self.root)
+        button_frame.pack(pady=5, fill=tk.X)
+        ttk.Button(button_frame, text="翻译选中", command=self.start_translation).pack(side=tk.LEFT)
+        ttk.Button(button_frame, text="删除选中", command=self.delete_files).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="设置", command=self.show_settings).pack(side=tk.RIGHT)
 
-        ttk.Button(button_frame, text="开始翻译", command=self.start_translation).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="删除选中", command=self.delete_selected_files).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="系统设置", command=self.open_settings_dialog).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="刷新列表", command=self.refresh_file_list).pack(side=tk.RIGHT, padx=5)
+        # 日志显示
+        self.log_text = scrolledtext.ScrolledText(self.root, height=10)
+        self.log_text.pack(pady=5, fill=tk.BOTH, expand=True)
 
-        # 日志区域
-        log_frame = ttk.Frame(self)
-        log_frame.pack(pady=10, fill=tk.BOTH, expand=True, padx=10)
-
-        self.log_area = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.DISABLED)
-        self.log_area.pack(fill=tk.BOTH, expand=True)
-
-    def browse_project_path(self):
+    def browse_path(self):
         path = filedialog.askdirectory()
         if path:
-            self.project_path.set(path)
-            self.log(f"已选择项目路径: {path}")
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, path)
 
-    def verify_project_structure(self):
-        path = self.project_path.get()
-        if not path:
-            self.show_error("请先选择项目路径")
+    def load_project(self):
+        self.project_path = self.path_entry.get()
+        if not os.path.exists(os.path.join(self.project_path, "sources")):
+            messagebox.showerror("错误", "无效的项目路径")
             return
+        self.log("项目加载成功")
 
-        required_dirs = ['.github', 'License', 'published', 'sources', 'translated']
-        missing = [d for d in required_dirs if not os.path.exists(os.path.join(path, d))]
-
-        if missing:
-            self.show_error(f"项目结构不完整，缺失目录: {', '.join(missing)}")
-        else:
-            self.log("项目结构验证通过")
-            self.refresh_file_list()
-
-    def load_file_list(self, event=None):
-        category = self.selected_category.get()
+    def load_files(self, event=None):
+        category = self.category_var.get()
         if not category:
             return
-
-        source_dir = os.path.join(self.project_path.get(), 'sources', category)
-        if not os.path.exists(source_dir):
-            self.show_error(f"目录不存在: {source_dir}")
-            return
-
+        source_dir = os.path.join(self.project_path, "sources", category)
         try:
-            files = [f for f in os.listdir(source_dir)
-                     if os.path.isfile(os.path.join(source_dir, f)) and f != 'README.md']
-
+            files = [f for f in os.listdir(source_dir) if f.endswith('.md')]
             self.file_listbox.delete(0, tk.END)
-            for f in sorted(files):
+            for f in files:
                 self.file_listbox.insert(tk.END, f)
-
-            self.log(f"已加载 {len(files)} 个文件到 {category} 分类")
         except Exception as e:
-            self.show_error(f"读取文件列表失败: {str(e)}")
+            self.log_error(f"加载文件失败: {str(e)}")
 
     def start_translation(self):
-        selected_files = self.get_selected_files()
-        if not selected_files:
-            self.show_warning("请先选择要翻译的文件")
+        selected = self.file_listbox.curselection()
+        if not selected:
+            messagebox.showwarning("警告", "请先选择要翻译的文件")
             return
+        files = [self.file_listbox.get(i) for i in selected]
+        threading.Thread(target=self.translate_files, args=(files,), daemon=True).start()
 
-        if not self.settings['api_key']:
-            self.show_error("请先配置API密钥")
-            return
-
-        category = self.selected_category.get()
-        source_dir = os.path.join(self.project_path.get(), 'sources', category)
-        target_dir = os.path.join(self.project_path.get(), 'translated', category)
-
+    def translate_files(self, files):
+        category = self.category_var.get()
+        source_dir = os.path.join(self.project_path, "sources", category)
+        target_dir = os.path.join(self.project_path, "translated", category)
         os.makedirs(target_dir, exist_ok=True)
 
-        for filename in selected_files:
+        for file in files:
             try:
-                with open(os.path.join(source_dir, filename), 'r', encoding='utf-8') as f:
+                self.log(f"开始翻译: {file}")
+                with open(os.path.join(source_dir, file), 'r', encoding='utf-8') as f:
                     content = f.read()
 
-                translated = self.translate_content(content)
-
-                with open(os.path.join(target_dir, filename), 'w', encoding='utf-8') as f:
-                    f.write(translated)
-
-                self.log(f"成功翻译并保存: {filename}")
+                translated = self.call_translation_api(content)
+                if translated:
+                    translated = self.process_translation(translated)
+                    target_path = os.path.join(target_dir, file)
+                    with open(target_path, 'w', encoding='utf-8') as f:
+                        f.write(translated)
+                    self.log(f"翻译完成: {file}")
             except Exception as e:
-                self.show_error(f"翻译失败 ({filename}): {str(e)}")
+                self.log_error(f"翻译失败 ({file}): {str(e)}")
+                messagebox.showerror("错误", f"翻译失败: {file}\n错误信息: {str(e)}")
 
-    def translate_content(self, content):
+    def call_translation_api(self, content):
         headers = {
-            "Authorization": f"Bearer {self.settings['api_key']}",
+            "Authorization": f"Bearer {self.config['api_key']}",
             "Content-Type": "application/json"
         }
-
-        payload = {
-            "model": self.settings['model'],
+        data = {
+            "model": self.config['model'],
             "messages": [
-                {"role": "system", "content": self.settings['prompt']},
+                {"role": "system", "content": self.config['prompt']},
                 {"role": "user", "content": content}
             ]
         }
+        try:
+            response = requests.post(
+                f"{self.config['api_base']}/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            response.raise_for_status()
 
-        response = requests.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers=headers,
-            json=payload
-        )
+            try:
+                result = response.json()
+                self.log(f"模型响应: {json.dumps(result, ensure_ascii=False)}")
+                return result['choices'][0]['message']['content']
+            except json.JSONDecodeError as e:
+                self.log_error(f"JSON解析失败，响应内容: {response.text}")
+                raise ValueError("无效的API响应格式")
 
-        response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
+        except requests.exceptions.RequestException as e:
+            self.log_error(f"API请求失败: {str(e)}")
+            raise
 
-    def delete_selected_files(self):
-        selected_files = self.get_selected_files()
-        if not selected_files:
-            self.show_warning("请先选择要删除的文件")
+    def process_translation(self, text):
+        # 处理元信息替换
+        text = text.replace("{{translator}}", "excniesnied")
+        text = text.replace("applied: false", "applied: true")
+        text = text.replace("translated: false", "translated: true")
+        return text
+
+    def delete_files(self):
+        selected = self.file_listbox.curselection()
+        if not selected:
             return
+        if not messagebox.askyesno("确认", "确定要删除选中的源文件吗？"):
+            return
+        category = self.category_var.get()
+        source_dir = os.path.join(self.project_path, "sources", category)
+        for i in reversed(selected):
+            file = self.file_listbox.get(i)
+            try:
+                os.remove(os.path.join(source_dir, file))
+                self.file_listbox.delete(i)
+                self.log(f"已删除文件: {file}")
+            except Exception as e:
+                self.log_error(f"删除失败 ({file}): {str(e)}")
 
-        if messagebox.askyesno("确认删除", f"确定要删除 {len(selected_files)} 个文件吗？"):
-            category = self.selected_category.get()
-            source_dir = os.path.join(self.project_path.get(), 'sources', category)
+    def show_settings(self):
+        settings_win = tk.Toplevel(self.root)
+        settings_win.title("API设置")
 
-            for filename in selected_files:
-                try:
-                    os.remove(os.path.join(source_dir, filename))
-                    self.log(f"已删除文件: {filename}")
-                except Exception as e:
-                    self.show_error(f"删除失败 ({filename}): {str(e)}")
+        ttk.Label(settings_win, text="API基础地址:").grid(row=0, column=0, padx=5, pady=2)
+        api_base_entry = ttk.Entry(settings_win, width=40)
+        api_base_entry.insert(0, self.config['api_base'])
+        api_base_entry.grid(row=0, column=1, padx=5, pady=2)
 
-            self.refresh_file_list()
+        ttk.Label(settings_win, text="API密钥:").grid(row=1, column=0)
+        api_key_entry = ttk.Entry(settings_win, width=40)
+        api_key_entry.insert(0, self.config['api_key'])
+        api_key_entry.grid(row=1, column=1)
 
-    def open_settings_dialog(self):
-        settings_win = tk.Toplevel(self)
-        settings_win.title("系统设置")
-        settings_win.geometry("600x400")
+        ttk.Label(settings_win, text="模型名称:").grid(row=2, column=0)
+        model_entry = ttk.Entry(settings_win, width=40)
+        model_entry.insert(0, self.config['model'])
+        model_entry.grid(row=2, column=1)
 
-        ttk.Label(settings_win, text="API配置").pack(pady=10)
-
-        # API密钥
-        ttk.Label(settings_win, text="API密钥:").place(x=20, y=50)
-        api_entry = ttk.Entry(settings_win, width=50)
-        api_entry.place(x=120, y=50)
-        api_entry.insert(0, self.settings['api_key'])
-
-        # 模型选择
-        ttk.Label(settings_win, text="模型名称:").place(x=20, y=90)
-        model_entry = ttk.Entry(settings_win, width=50)
-        model_entry.place(x=120, y=90)
-        model_entry.insert(0, self.settings['model'])
-
-        # 提示词
-        ttk.Label(settings_win, text="提示词:").place(x=20, y=130)
-        prompt_text = tk.Text(settings_win, width=65, height=10)
-        prompt_text.place(x=20, y=160)
-        prompt_text.insert(tk.END, self.settings['prompt'])
+        ttk.Label(settings_win, text="提示词:").grid(row=3, column=0)
+        prompt_entry = tk.Text(settings_win, width=40, height=10)
+        prompt_entry.insert(tk.END, self.config['prompt'])
+        prompt_entry.grid(row=3, column=1)
 
         def save_settings():
-            self.settings['api_key'] = api_entry.get()
-            self.settings['model'] = model_entry.get()
-            self.settings['prompt'] = prompt_text.get("1.0", tk.END).strip()
+            self.config.update({
+                'api_base': api_base_entry.get(),
+                'api_key': api_key_entry.get(),
+                'model': model_entry.get(),
+                'prompt': prompt_entry.get("1.0", tk.END).strip()
+            })
             settings_win.destroy()
-            self.log("系统设置已更新")
+            self.log("设置已保存")
 
-        ttk.Button(settings_win, text="保存配置", command=save_settings).pack(side=tk.BOTTOM, pady=10)
-
-    def refresh_file_list(self):
-        self.load_file_list()
-        self.log("文件列表已刷新")
-
-    def get_selected_files(self):
-        return [self.file_listbox.get(i) for i in self.file_listbox.curselection()]
+        ttk.Button(settings_win, text="保存", command=save_settings).grid(row=4, column=1, pady=5)
 
     def log(self, message):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_message = f"[{timestamp}] {message}\n"
-        self.log_area.configure(state=tk.NORMAL)
-        self.log_area.insert(tk.END, log_message)
-        self.log_area.configure(state=tk.DISABLED)
-        self.log_area.see(tk.END)
-        print(log_message.strip())
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        self.log_text.insert(tk.END, f"{timestamp} {message}\n")
+        self.log_text.see(tk.END)
+        self.logger.info(message)
 
-    def show_error(self, message):
-        messagebox.showerror("错误", message)
-        self.log(f"[错误] {message}")
-
-    def show_warning(self, message):
-        messagebox.showwarning("警告", message)
-        self.log(f"[警告] {message}")
+    def log_error(self, message):
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        self.log_text.insert(tk.END, f"{timestamp} [错误] {message}\n", 'error')
+        self.log_text.see(tk.END)
+        self.logger.error(message)
 
 if __name__ == "__main__":
-    app = TranslateApp()
-    app.mainloop()
+    root = tk.Tk()
+    app = TranslationApp(root)
+    root.geometry("800x600")
+    root.mainloop()
