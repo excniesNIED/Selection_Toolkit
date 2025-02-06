@@ -15,43 +15,56 @@ def process_markdown_file(filepath):
         lines = f.readlines()
 
     in_metadata = False
+    in_code_block = False # 新增：标记是否在代码块内
     metadata_end_line = -1
     processed_lines = []
     consecutive_blank_lines = 0
 
-    # 步骤1：定位元数据区域，并处理非元数据区域的行首空格
+    # 步骤1：定位元数据区域和代码块区域，并处理非元数据区域的行首空格
     for i, line in enumerate(lines):
-        if line.strip() == '---':
+
+        stripped_line = line.lstrip() # 移除行首所有空格，用于判断类型 (提前到循环最前面)
+
+        if stripped_line.startswith('---'):
             if not in_metadata:
                 in_metadata = True
             else:
                 in_metadata = False
                 metadata_end_line = i # 记录元数据结束行
-            processed_lines.append(line) # 元数据行保留，不处理
+            processed_lines.append(stripped_line + '\n') # 元数据行, 使用stripped_line, 并添加换行符
             continue
 
         if in_metadata:
             processed_lines.append(line) # 元数据区域内容保持不变
             continue
 
-        # 非元数据区域处理
-        stripped_line = line.lstrip() # 移除行首所有空格，用于判断类型
 
-        if re.match(r'^`', stripped_line): # 代码块开始/结束行 (`)
-            processed_lines.append(line) # 代码块标识行保留原始格式，可能需要行首空格
-        elif re.match(r'^    ', line) or re.match(r'^\t', line): # 缩进代码块 (4个空格或制表符开头)
+        if stripped_line.startswith('```'): # 代码块开始/结束行 (`)
+            if not in_code_block:
+                in_code_block = True
+            else:
+                in_code_block = False
+            processed_lines.append(stripped_line + '\n') # 代码块标识行, 使用stripped_line, 并添加换行符
+            continue
+
+        if in_code_block:
+            processed_lines.append(stripped_line + '\n') # 代码块内的行，移除所有行首空格和制表符, 并添加换行符
+            continue
+
+
+        if re.match(r'^    ', line) or re.match(r'^\t', line): # 缩进代码块 (4个空格或制表符开头)，在代码块之外的缩进代码需要保留
             processed_lines.append(line) # 缩进代码行保留原始格式
         elif re.match(r'^[-*+] ', stripped_line): # 无序列表
-            processed_lines.append(stripped_line) # 移除列表项前的空格
+            processed_lines.append(stripped_line + '\n') # 移除列表项前的空格, 并添加换行符
         elif re.match(r'^\d+\. ', stripped_line) or re.match(r'^\d+\) ', stripped_line): # 有序列表
-            processed_lines.append(stripped_line) # 移除列表项前的空格
+            processed_lines.append(stripped_line + '\n') # 移除列表项前的空格, 并添加换行符
         elif stripped_line == '\n': # 空行 （只包含换行符，或者去除空格后是空行）
             processed_lines.append(stripped_line) # 空行保留，后续处理空行数量
         else:
-            processed_lines.append(stripped_line) # 非特殊格式行，移除行首空格
+            processed_lines.append(stripped_line + '\n') # 非特殊格式行，移除行首空格, 并添加换行符
 
 
-    # 步骤2：清除大于两个的空行
+    # 步骤2：清除大于两个的空行 (这部分代码保持不变)
     final_processed_lines = []
     consecutive_blank_lines = 0
     for line in processed_lines:
